@@ -12,6 +12,7 @@ References
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar
 
@@ -26,6 +27,25 @@ from . import conventions, esa_safe
 
 SPEED_OF_LIGHT = 299_792_458  # m / s
 ONE_SECOND = np.timedelta64(1, "s")
+PROCESSING_INFO_PARAMS = [
+    "rawDataAnalysisUsed",
+    "orbitDataFileUsed",
+    "attitudeDataFileUsed",
+    "rxVariationCorrectionApplied",
+    "antennaElevationPatternApplied",
+    "antennaAzimuthPatternApplied",
+    "antennaAzimuthElementPatternApplied",
+    "dcMethod",
+    "dcInputData",
+    "rangeSpreadingLossCompensationApplied",
+    "srgrConversionApplied",
+    "detectionPerformed",
+    "thermalNoiseCorrectionPerformed",
+    "chirpSource",
+    "pgSource",
+    "rrfSpectrum",
+    "applicationLutId",
+]
 
 
 DataArrayOrDataset = TypeVar("DataArrayOrDataset", xr.DataArray, xr.Dataset)
@@ -547,6 +567,17 @@ def make_azimuth_time(
     return azimuth_time.values
 
 
+def camel_to_snake(string: str) -> str:
+    """Convert camel-case into snake_case.
+
+    :param str string: the input string in camel case
+    :return str:
+    """
+    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", string)
+    snake_case_str = re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+    return snake_case_str
+
+
 def open_pol_dataset(
     measurement: esa_safe.PathOrFileType,
     annotation: esa_safe.PathOrFileType,
@@ -554,10 +585,15 @@ def open_pol_dataset(
     attrs: Dict[str, Any] = {},
     gcp: Optional[xr.Dataset] = None,
 ) -> xr.Dataset:
+    processing_information = esa_safe.parse_tag(annotation, ".//processingInformation")
     product_information = esa_safe.parse_tag(annotation, ".//productInformation")
     image_information = esa_safe.parse_tag(annotation, ".//imageInformation")
     swath_timing = esa_safe.parse_tag(annotation, ".//swathTiming")
 
+    processing_info_attrs = {
+        camel_to_snake(k): str(processing_information[k]).lower()
+        for k in PROCESSING_INFO_PARAMS
+    }
     number_of_samples = image_information["numberOfSamples"]
     range_sampling_rate = product_information["rangeSamplingRate"]
 
@@ -570,6 +606,7 @@ def open_pol_dataset(
     range_pixel_spacing = image_information["rangePixelSpacing"]
 
     attrs = attrs.copy()
+    attrs.update(processing_info_attrs)
     attrs.update(
         {
             "radar_frequency": product_information["radarFrequency"] / 10**9,
